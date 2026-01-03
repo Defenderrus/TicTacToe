@@ -1205,11 +1205,9 @@ class Game {
                 selectedTimeLimit(chrono::seconds(10)), windowSize(800, 600) {
             window.setFramerateLimit(static_cast<unsigned int>(targetFPS));
             
-            if (!font.openFromFile("arial.ttf")) {
-                if (!font.openFromFile("C:/Windows/Fonts/arial.ttf")) {
-                    if (!font.openFromFile("C:/Windows/Fonts/tahoma.ttf")) {
-                        cerr << L"Не удалось загрузить шрифт!" << endl;
-                    }
+            if (!font.openFromFile("C:/Windows/Fonts/arial.ttf")) {
+                if (!font.openFromFile("C:/Windows/Fonts/tahoma.ttf")) {
+                    cerr << L"Не удалось загрузить шрифт!" << endl;
                 }
             }
             
