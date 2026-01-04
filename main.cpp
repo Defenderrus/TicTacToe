@@ -12,6 +12,7 @@
 #include <cmath>
 #include <array>
 #include <unordered_map>
+#include <unordered_set>
 #include <set>
 
 using namespace std;
@@ -19,9 +20,11 @@ using namespace sf;
 
 // Перечисления и структуры
 enum class Cell { EMPTY, X, O };
+enum class BotDifficulty { EASY, MEDIUM, HARD };
+enum class OpponentType { PLAYER_VS_PLAYER, PLAYER_VS_BOT };
 enum class GameMode { CLASSIC, TIMED, SCORING, RANDOM_EVENTS };
 enum class RandomEvent { NOTHING, SCORE_PLUS_10, SCORE_MINUS_10, SCORE_PLUS_25, SCORE_MINUS_25, BONUS_MOVE, SWAP_PLAYERS, CLEAR_AREA };
-enum class GameState { MENU, PLAYING, PAUSED, GAME_OVER, SCORE_SELECTION, TIME_SELECTION };
+enum class GameState { MENU, PLAYING, PAUSED, GAME_OVER, SCORE_SELECTION, TIME_SELECTION, OPPONENT_SELECTION, DIFFICULTY_SELECTION };
 
 // Хэш-функция для Position
 struct PositionHash {
@@ -248,6 +251,391 @@ class Button {
         }
 };
 
+// Класс бота
+class TicTacToeBot {
+    private:
+        BotDifficulty difficulty;
+        Cell botSymbol;
+        Cell opponentSymbol;
+        int searchDepth;
+        int maxMovesToConsider;
+        
+        // Оценка линии
+        int evaluateLine(const GameBoard &board, const Position &start, int dx, int dy, Cell player, int lineLength) const {
+            int bestScore = 0;
+            
+            for (int offset = -lineLength + 1; offset <= 0; offset++) {
+                int playerCount = 0;
+                int emptyCount = 0;
+                bool blocked = false;
+                
+                for (int i = 0; i < lineLength; i++) {
+                    Position pos(start.x + dx * (offset + i), start.y + dy * (offset + i));
+                    Cell cell = board.get(pos);
+                    
+                    if (cell == player) playerCount++;
+                    else if (cell == Cell::EMPTY) emptyCount++;
+                    else {
+                        blocked = true;
+                        break;
+                    }
+                }
+                
+                if (!blocked) {
+                    if (playerCount == lineLength) return 10000;
+                    if (playerCount == lineLength - 1 && emptyCount == 1) return 1000;
+                    if (playerCount == lineLength - 2 && emptyCount == 2) return 100;
+                    if (playerCount >= 2) bestScore = max(bestScore, playerCount * 10);
+                }
+            }
+            
+            return bestScore;
+        }
+        
+        // Оценка позиции
+        int evaluatePosition(const GameBoard &board, int lineLength) const {
+            int score = 0;
+
+            score += evaluateAllLines(board, botSymbol, lineLength);
+            score -= evaluateAllLines(board, opponentSymbol, lineLength) * 1.2f;
+            score += evaluateCenterControl(board);
+            
+            return score;
+        }
+        
+        // Оценка всех линий
+        int evaluateAllLines(const GameBoard &board, Cell player, int lineLength) const {
+            int totalScore = 0;
+            auto positions = board.getOccupiedPositions(player);
+            
+            if (positions.empty()) return 0;
+            
+            constexpr array<pair<int, int>, 4> directions = {{ {1, 0}, {0, 1}, {1, 1}, {1, -1} }};
+            
+            // Используем кэш для уже оцененных линий
+            unordered_map<pair<int, int>, bool, PositionHash> processed;
+            
+            for (const auto &pos : positions) {
+                for (const auto &dir : directions) {
+                    int dx = dir.first, dy = dir.second;
+                    
+                    // Ключ для кэша
+                    pair<int, int> lineKey = {pos.x * 1000 + dx, pos.y * 1000 + dy};
+                    if (processed[lineKey]) continue;
+                    processed[lineKey] = true;
+                    
+                    totalScore += evaluateLine(board, pos, dx, dy, player, lineLength);
+                }
+            }
+            
+            return totalScore;
+        }
+        
+        // Оценка контроля центра
+        int evaluateCenterControl(const GameBoard &board) const {
+            int score = 0;
+            
+            // Центральные клетки
+            Position center(0, 0);
+            if (board.get(center) == botSymbol) score += 50;
+            else if (board.get(center) == opponentSymbol) score -= 60;
+            
+            // Клетки на расстоянии 1
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dy = -1; dy <= 1; dy++) {
+                    if (dx == 0 && dy == 0) continue;
+                    Position pos(dx, dy);
+                    Cell cell = board.get(pos);
+                    
+                    if (cell == botSymbol) score += 20;
+                    else if (cell == opponentSymbol) score -= 25;
+                }
+            }
+            
+            return score;
+        }
+        
+        // Проверка быстрой победы или поражения
+        optional<Position> checkImmediateWinOrBlock(const GameBoard &board, int lineLength) {
+            // Выигрыш для бота
+            auto winMove = findWinningMove(board, botSymbol, lineLength);
+            if (winMove.has_value()) return winMove;
+            
+            // Блокировка выигрыша противника
+            auto blockMove = findWinningMove(board, opponentSymbol, lineLength);
+            if (blockMove.has_value()) return blockMove;
+            
+            return nullopt;
+        }
+        
+        // Поиск выигрышного хода
+        optional<Position> findWinningMove(const GameBoard &board, Cell player, int lineLength) const {
+            auto emptyPositions = getPotentialMoves(board);
+            
+            for (const auto &pos : emptyPositions) {
+                GameBoard tempBoard = board;
+                tempBoard.set(pos, player);
+                if (checkWinForPlayer(tempBoard, player, lineLength)) return pos;
+            }
+            
+            return nullopt;
+        }
+        
+        // Проверка победы
+        bool checkWinForPlayer(const GameBoard &board, Cell player, int lineLength) const {
+            auto positions = board.getOccupiedPositions(player);
+            
+            for (const auto &pos : positions) {
+                constexpr array<pair<int, int>, 4> directions = {{ {1, 0}, {0, 1}, {1, 1}, {1, -1} }};
+                
+                for (const auto &dir : directions) {
+                    int dx = dir.first, dy = dir.second;
+                    
+                    for (int offset = -lineLength + 1; offset <= 0; offset++) {
+                        bool win = true;
+                        for (int i = 0; i < lineLength; i++) {
+                            Position checkPos(pos.x + dx * (offset + i), pos.y + dy * (offset + i));
+                            if (board.get(checkPos) != player) {
+                                win = false;
+                                break;
+                            }
+                        }
+                        if (win) return true;
+                    }
+                }
+            }
+            
+            return false;
+        }
+        
+        // Минимакс с альфа-бета отсечением
+        pair<int, Position> minimax(const GameBoard &board, int depth, int alpha, int beta, bool maximizingPlayer, int lineLength) {
+            // Быстрая проверка на терминальное состояние
+            if (depth == 0) return {evaluatePosition(board, lineLength), Position(0, 0)};
+            
+            // Возможные ходы с сортировкой
+            vector<Position> possibleMoves = getPotentialMoves(board);
+            if (possibleMoves.empty()) return {0, Position(0, 0)};
+            
+            // Сортировка ходов по эвристике для лучшего альфа-бета отсечения
+            sort(possibleMoves.begin(), possibleMoves.end(),
+                [&](const Position &a, const Position &b) {
+                    return evaluateMove(board, a) > evaluateMove(board, b);
+                });
+            
+            // Ограничение количества рассматриваемых ходов
+            int movesToConsider = min(maxMovesToConsider, (int)possibleMoves.size());
+            
+            if (maximizingPlayer) {
+                int maxEval = INT_MIN;
+                Position bestMove = possibleMoves[0];
+                
+                for (int i = 0; i < movesToConsider; i++) {
+                    const Position &move = possibleMoves[i];
+                    
+                    GameBoard newBoard = board;
+                    newBoard.set(move, botSymbol);
+                    
+                    // Проверка на победу
+                    if (checkWinForPlayer(newBoard, botSymbol, lineLength)) {
+                        return {10000 + depth * 10, move};
+                    }
+                    
+                    auto [eval, _] = minimax(newBoard, depth - 1, alpha, beta, false, lineLength);
+                    
+                    if (eval > maxEval) {
+                        maxEval = eval;
+                        bestMove = move;
+                    }
+                    
+                    alpha = max(alpha, eval);
+                    if (beta <= alpha) {
+                        break; // Альфа-бета отсечение
+                    }
+                }
+                
+                return {maxEval, bestMove};
+            } else {
+                int minEval = INT_MAX;
+                Position bestMove = possibleMoves[0];
+                
+                for (int i = 0; i < movesToConsider; i++) {
+                    const Position &move = possibleMoves[i];
+                    
+                    GameBoard newBoard = board;
+                    newBoard.set(move, opponentSymbol);
+                    
+                    // Проверка на проигрыш
+                    if (checkWinForPlayer(newBoard, opponentSymbol, lineLength)) {
+                        return {-10000 - depth * 10, move};
+                    }
+                    
+                    auto [eval, _] = minimax(newBoard, depth - 1, alpha, beta, true, lineLength);
+                    
+                    if (eval < minEval) {
+                        minEval = eval;
+                        bestMove = move;
+                    }
+                    
+                    beta = min(beta, eval);
+                    if (beta <= alpha) {
+                        break; // Альфа-бета отсечение
+                    }
+                }
+                
+                return {minEval, bestMove};
+            }
+        }
+        
+        // Эвристическая оценка хода
+        int evaluateMove(const GameBoard &board, const Position &move) const {
+            int score = 0;
+            
+            // Центральность
+            int distance = abs(move.x) + abs(move.y);
+            score += (5 - distance) * 10;
+            
+            // Соседи
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dy = -1; dy <= 1; dy++) {
+                    if (dx == 0 && dy == 0) continue;
+                    Position neighbor(move.x + dx, move.y + dy);
+                    Cell cell = board.get(neighbor);
+                    
+                    if (cell == botSymbol) score += 15;
+                    else if (cell == opponentSymbol) score += 10; // Близость к противнику тоже важна
+                }
+            }
+            
+            return score;
+        }
+        
+        // Возможные ходы
+        vector<Position> getPotentialMoves(const GameBoard &board) const {
+            vector<Position> moves;
+            unordered_set<pair<int, int>, PositionHash> moveSet;
+            
+            // Границы поля
+            int minX, maxX, minY, maxY;
+            board.getBounds(minX, maxX, minY, maxY);
+            
+            // Область поиска
+            int expansion = (difficulty == BotDifficulty::HARD) ? 3 : 2;
+            int searchRadius;
+            switch (difficulty) {
+                case BotDifficulty::EASY: searchRadius = 1; break;
+                case BotDifficulty::MEDIUM: searchRadius = 2; break;
+                case BotDifficulty::HARD: searchRadius = 2; break;
+            }
+            
+            // Занятые позиции
+            auto occupied = board.getOccupiedPositions();
+            
+            // Соседние пустые к занятым позициям
+            for (const auto &pos : occupied) {
+                for (int dx = -searchRadius; dx <= searchRadius; dx++) {
+                    for (int dy = -searchRadius; dy <= searchRadius; dy++) {
+                        Position candidate(pos.x + dx, pos.y + dy);
+                        
+                        if (board.get(candidate) == Cell::EMPTY) {
+                            pair<int, int> key = candidate.toPair();
+                            if (moveSet.find(key) == moveSet.end()) {
+                                moves.push_back(candidate);
+                                moveSet.insert(key);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Если нет ходов (начало игры), добавляем центральные позиции
+            if (moves.empty()) {
+                array<Position, 9> startPositions = {{
+                    Position(0, 0), Position(-1, -1), Position(-1, 0), Position(-1, 1),
+                    Position(0, -1), Position(0, 1), Position(1, -1), Position(1, 0), Position(1, 1)
+                }};
+                
+                for (const auto &pos : startPositions) {
+                    if (board.get(pos) == Cell::EMPTY) moves.push_back(pos);
+                }
+            }
+            
+            return moves;
+        }
+    public:
+        TicTacToeBot(BotDifficulty diff = BotDifficulty::MEDIUM, Cell symbol = Cell::O): difficulty(diff), botSymbol(symbol) {
+            opponentSymbol = (botSymbol == Cell::X) ? Cell::O : Cell::X;
+            
+            // Параметры для баланса скорость/качество
+            switch (difficulty) {
+                case BotDifficulty::EASY:
+                    searchDepth = 2;
+                    maxMovesToConsider = 6;
+                    break;
+                case BotDifficulty::MEDIUM:
+                    searchDepth = 3;
+                    maxMovesToConsider = 10;
+                    break;
+                case BotDifficulty::HARD:
+                    searchDepth = 4;
+                    maxMovesToConsider = 15;
+                    break;
+            }
+        }
+        
+        // Основной метод для получения хода
+        Position getBestMove(const GameBoard &board, int lineLength) {
+            // Проверка на немедленную победу или блокировку
+            auto immediate = checkImmediateWinOrBlock(board, lineLength);
+            if (immediate.has_value()) {
+                return immediate.value();
+            }
+            
+            // Для легкого уровня - иногда случайный ход
+            if (difficulty == BotDifficulty::EASY) {
+                static mt19937 rng(static_cast<unsigned>(chrono::system_clock::now().time_since_epoch().count()));
+                uniform_int_distribution<int> dist(0, 100);
+                if (dist(rng) < 40) { // 40% случайный ход
+                    auto moves = getPotentialMoves(board);
+                    if (!moves.empty()) {
+                        uniform_int_distribution<int> moveDist(0, moves.size() - 1);
+                        return moves[moveDist(rng)];
+                    }
+                }
+            }
+            
+            // Для всех уровней - минимакс с ограниченной глубиной
+            return minimax(board, searchDepth, INT_MIN, INT_MAX, true, lineLength).second;
+        }
+        
+        // Обновить сложность
+        void setDifficulty(BotDifficulty diff) {
+            difficulty = diff;
+            switch (difficulty) {
+                case BotDifficulty::EASY:
+                    searchDepth = 2;
+                    maxMovesToConsider = 6;
+                    break;
+                case BotDifficulty::MEDIUM:
+                    searchDepth = 3;
+                    maxMovesToConsider = 10;
+                    break;
+                case BotDifficulty::HARD:
+                    searchDepth = 4;
+                    maxMovesToConsider = 15;
+                    break;
+            }
+        }
+        
+        // Установить символ бота
+        void setSymbol(Cell symbol) {
+            botSymbol = symbol;
+            opponentSymbol = (botSymbol == Cell::X) ? Cell::O : Cell::X;
+        }
+        
+        BotDifficulty getDifficulty() const { return difficulty; }
+};
+
 // Класс игры
 class InfiniteTicTacToe {
     private:
@@ -263,6 +651,9 @@ class InfiniteTicTacToe {
         Vector2f center;
         
         // Игровая логика
+        OpponentType opponentType;
+        unique_ptr<TicTacToeBot> bot;
+        BotDifficulty botDifficulty;
         chrono::steady_clock::time_point lastMoveTime;
         int playerXScore;
         int playerOScore;
@@ -275,6 +666,7 @@ class InfiniteTicTacToe {
         vector<Position> moveHistory;
         vector<Position> winLine;
         RandomEvent lastEvent;
+        bool isBotTurn;
         bool gameWon;
         bool gameEndedByScore;
         Cell winner;
@@ -722,9 +1114,11 @@ class InfiniteTicTacToe {
         }
     public:
         InfiniteTicTacToe(GameMode mode = GameMode::CLASSIC, int winningLength = 5, int targetScore = 300,
-                        chrono::seconds timeLimit = chrono::seconds(10), Vector2f windowCenter = Vector2f(400, 300)):
+                          chrono::seconds timeLimit = chrono::seconds(10), Vector2f windowCenter = Vector2f(400, 300),
+                          OpponentType oppType = OpponentType::PLAYER_VS_PLAYER, BotDifficulty botDiff = BotDifficulty::MEDIUM):
                         currentPlayer(Cell::X), mode(mode), winningLength(winningLength), targetScore(targetScore),
-                        moveTimeLimit(timeLimit), cellSize(40.0f), center(windowCenter), playerXScore(0), playerOScore(0),
+                        moveTimeLimit(timeLimit), cellSize(40.0f), center(windowCenter), opponentType(oppType),
+                        botDifficulty(botDiff), isBotTurn(false), playerXScore(0), playerOScore(0),
                         playerXBaseScore(0), playerOBaseScore(0), playerXBonusScore(0), playerOBonusScore(0),
                         gameWon(false), gameEndedByScore(false), winner(Cell::EMPTY), lastEvent(RandomEvent::NOTHING),
                         rng(static_cast<unsigned int>(chrono::steady_clock::now().time_since_epoch().count())),
@@ -732,11 +1126,16 @@ class InfiniteTicTacToe {
                         xVertices(PrimitiveType::Lines), oVertices(PrimitiveType::Lines), highlightVertices(PrimitiveType::TriangleStrip) {
             lastMoveTime = chrono::steady_clock::now();
             checkDirections.fill(true);
+            if (opponentType == OpponentType::PLAYER_VS_BOT) {
+                bot = make_unique<TicTacToeBot>(botDiff, currentPlayer);
+                isBotTurn = true;
+            }
         }
         
         // Обработка клика мыши
         bool handleClick(const Vector2f &mousePos) {
             if (gameWon) return false;
+            if (opponentType == OpponentType::PLAYER_VS_BOT && isBotTurn) return false;
             
             int gridX = static_cast<int>(floor((mousePos.x - center.x) / cellSize));
             int gridY = static_cast<int>(floor((mousePos.y - center.y) / cellSize));
@@ -760,14 +1159,8 @@ class InfiniteTicTacToe {
             lastMoveTime = chrono::steady_clock::now();
             bool wonByLine = checkWin(pos);
             
-            // Расширяем поле если нужно
             expandBoardIfNeeded(pos);
-            
-            // Для режимов с очками пересчитываем
-            if (mode == GameMode::SCORING || mode == GameMode::RANDOM_EVENTS) {
-                calculateBoardScores();
-            }
-            
+            if (mode == GameMode::SCORING || mode == GameMode::RANDOM_EVENTS) calculateBoardScores();
             if (gameWon) {
                 graphicsDirty = true;
                 return true;
@@ -785,9 +1178,31 @@ class InfiniteTicTacToe {
             }
             
             currentPlayer = (currentPlayer == Cell::X) ? Cell::O : Cell::X;
+            if (opponentType == OpponentType::PLAYER_VS_BOT) isBotTurn = true;
             graphicsDirty = true;
             
             return false;
+        }
+
+        // Ход бота
+        void makeBotMove() {
+            if (!bot || !isBotTurn || gameWon) return;
+
+            // Получаем лучший ход от бота
+            Position botMove = bot->getBestMove(board, winningLength);
+
+            // Выполняем ход
+            board.set(botMove, currentPlayer);
+            moveHistory.push_back(botMove);
+            lastMoveTime = chrono::steady_clock::now();
+            bool wonByLine = checkWin(botMove);
+            graphicsDirty = true;
+            expandBoardIfNeeded(botMove);
+            if (gameWon) return;
+
+            // Передаем ход человеку
+            currentPlayer = (currentPlayer == Cell::X) ? Cell::O : Cell::X;
+            isBotTurn = false;
         }
         
         // Отрисовка
@@ -860,6 +1275,28 @@ class InfiniteTicTacToe {
                 lengthText.setFillColor(Color::White);
                 lengthText.setPosition(Vector2f(20, 75));
                 window.draw(lengthText);
+            }
+
+            // Информация о противнике
+            if (mode == GameMode::CLASSIC) {
+                String opponentStr;
+                if (opponentType == OpponentType::PLAYER_VS_PLAYER) {
+                    opponentStr = L"Игрок";
+                } else {
+                    opponentStr = L"Бот";
+                    String difficultyStr;
+                    switch (botDifficulty) {
+                        case BotDifficulty::EASY: difficultyStr = L" (лёгкий)"; break;
+                        case BotDifficulty::MEDIUM: difficultyStr = L" (средний)"; break;
+                        case BotDifficulty::HARD: difficultyStr = L" (сложный)"; break;
+                    }
+                    opponentStr += difficultyStr;
+                }
+                
+                Text opponentText(font, L"Противник: " + opponentStr, 14);
+                opponentText.setFillColor(Color::Green);
+                opponentText.setPosition(Vector2f(20, 100));
+                window.draw(opponentText);
             }
             
             // Счет (для режимов с очками)
@@ -976,6 +1413,7 @@ class InfiniteTicTacToe {
         
         // Геттеры
         bool isGameWon() const { return gameWon; }
+        bool isBotCurrentTurn() const { return isBotTurn; }
         Cell getCurrentPlayer() const { return currentPlayer; }
         pair<int, int> getScore() const { return {playerXScore, playerOScore}; }
         GameMode getGameMode() const { return mode; }
@@ -1001,6 +1439,18 @@ class InfiniteTicTacToe {
             checkDirections.fill(true);
             cellSize = 40.0f;
             visited.clear();
+
+            if (opponentType == OpponentType::PLAYER_VS_BOT) {
+                if (!bot) {
+                    bot = make_unique<TicTacToeBot>(botDifficulty, currentPlayer);
+                } else {
+                    bot->setSymbol(currentPlayer);
+                    bot->setDifficulty(botDifficulty);
+                }
+                isBotTurn = true;
+            } else {
+                isBotTurn = false;
+            }
         }
         
         void reset(GameMode newMode, int newWinningLength, int newTargetScore, chrono::seconds newTimeLimit) {
@@ -1032,6 +1482,8 @@ class Game {
     private:
         RenderWindow window;
         GameState currentState;
+        GameState opponentSelectionState;
+        GameState difficultySelectionState;
         unique_ptr<InfiniteTicTacToe> game;
         Font font;
         
@@ -1040,12 +1492,16 @@ class Game {
         vector<Button> pauseButtons;
         vector<Button> scoreButtons;
         vector<Button> timeButtons;
+        vector<Button> opponentButtons;
+        vector<Button> difficultyButtons;
         
         // Выбранный режим и параметры
         GameMode selectedMode;
         int selectedLength;
         int selectedScoreTarget;
         chrono::seconds selectedTimeLimit;
+        OpponentType selectedOpponent;
+        BotDifficulty selectedDifficulty;
         
         // Камера
         View gameView;
@@ -1070,7 +1526,7 @@ class Game {
             
             const float buttonWidth = 320;
             const float buttonHeight = 50;
-            const float startY = 150;
+            const float startY = 180;
             const float spacing = 60;
             
             menuButtons.reserve(5);
@@ -1088,10 +1544,11 @@ class Game {
             const float buttonWidth = 240;
             const float buttonHeight = 50;
             const float startY = 250;
+            const float spacing = 60;
             
             pauseButtons.emplace_back(Vector2f(280, startY), Vector2f(buttonWidth, buttonHeight), font, L"Продолжить", 22);
-            pauseButtons.emplace_back(Vector2f(280, startY + 60), Vector2f(buttonWidth, buttonHeight), font, L"Новая игра", 22);
-            pauseButtons.emplace_back(Vector2f(280, startY + 120), Vector2f(buttonWidth, buttonHeight), font, L"В главное меню", 22);
+            pauseButtons.emplace_back(Vector2f(280, startY + spacing), Vector2f(buttonWidth, buttonHeight), font, L"Новая игра", 22);
+            pauseButtons.emplace_back(Vector2f(280, startY + spacing * 2), Vector2f(buttonWidth, buttonHeight), font, L"В главное меню", 22);
         }
         
         void setupScoreSelection() {
@@ -1123,6 +1580,35 @@ class Game {
             timeButtons.emplace_back(Vector2f(280, startY + spacing * 2), Vector2f(buttonWidth, buttonHeight), font, L"20 секунд", 22);
             timeButtons.emplace_back(Vector2f(280, startY + spacing * 3), Vector2f(buttonWidth, buttonHeight), font, L"Назад", 22);
         }
+
+        void setupOpponentSelection() {
+            opponentButtons.clear();
+            opponentButtons.reserve(3);
+            
+            const float buttonWidth = 300;
+            const float buttonHeight = 50;
+            const float startY = 200;
+            const float spacing = 60;
+            
+            opponentButtons.emplace_back(Vector2f(250, startY), Vector2f(buttonWidth, buttonHeight), font, L"Игрок vs Игрок", 22);
+            opponentButtons.emplace_back(Vector2f(250, startY + spacing), Vector2f(buttonWidth, buttonHeight), font, L"Игрок vs Бот", 22);
+            opponentButtons.emplace_back(Vector2f(250, startY + spacing * 2), Vector2f(buttonWidth, buttonHeight), font, L"Назад", 22);
+        }
+
+        void setupDifficultySelection() {
+            difficultyButtons.clear();
+            difficultyButtons.reserve(4);
+            
+            const float buttonWidth = 240;
+            const float buttonHeight = 50;
+            const float startY = 200;
+            const float spacing = 60;
+            
+            difficultyButtons.emplace_back(Vector2f(280, startY), Vector2f(buttonWidth, buttonHeight), font, L"Легкий", 22);
+            difficultyButtons.emplace_back(Vector2f(280, startY + spacing), Vector2f(buttonWidth, buttonHeight), font, L"Средний", 22);
+            difficultyButtons.emplace_back(Vector2f(280, startY + spacing * 2), Vector2f(buttonWidth, buttonHeight), font, L"Сложный", 22);
+            difficultyButtons.emplace_back(Vector2f(280, startY + spacing * 3), Vector2f(buttonWidth, buttonHeight), font, L"Назад", 22);
+        }
         
         void updateButtonsForWindowSize() {
             Vector2u newSize = window.getSize();
@@ -1140,11 +1626,11 @@ class Game {
             if (!menuButtons.empty()) {
                 float centerX = windowSize.x / 2.0f;
                 
-                menuButtons[0].setPosition(Vector2f(centerX - 160, 150));
-                menuButtons[1].setPosition(Vector2f(centerX - 160, 210));
-                menuButtons[2].setPosition(Vector2f(centerX - 160, 270));
-                menuButtons[3].setPosition(Vector2f(centerX - 160, 330));
-                menuButtons[4].setPosition(Vector2f(centerX - 160, 390));
+                menuButtons[0].setPosition(Vector2f(centerX - 160, 180));
+                menuButtons[1].setPosition(Vector2f(centerX - 160, 240));
+                menuButtons[2].setPosition(Vector2f(centerX - 160, 300));
+                menuButtons[3].setPosition(Vector2f(centerX - 160, 360));
+                menuButtons[4].setPosition(Vector2f(centerX - 160, 420));
             }
             
             if (!pauseButtons.empty()) {
@@ -1172,19 +1658,39 @@ class Game {
                 timeButtons[2].setPosition(Vector2f(centerX - 120, 320));
                 timeButtons[3].setPosition(Vector2f(centerX - 120, 380));
             }
+
+            if (!opponentButtons.empty()) {
+                float centerX = windowSize.x / 2.0f;
+                
+                opponentButtons[0].setPosition(Vector2f(centerX - 150, 200));
+                opponentButtons[1].setPosition(Vector2f(centerX - 150, 260));
+                opponentButtons[2].setPosition(Vector2f(centerX - 150, 320));
+            }
+            
+            if (!difficultyButtons.empty()) {
+                float centerX = windowSize.x / 2.0f;
+                
+                difficultyButtons[0].setPosition(Vector2f(centerX - 120, 200));
+                difficultyButtons[1].setPosition(Vector2f(centerX - 120, 260));
+                difficultyButtons[2].setPosition(Vector2f(centerX - 120, 320));
+                difficultyButtons[3].setPosition(Vector2f(centerX - 120, 380));
+            }
             
             if (game) {
                 game->setCenter(viewCenter);
             }
         }
         
-        void startGame(GameMode mode, int length, int scoreTarget = 300, chrono::seconds timeLimit = chrono::seconds(10)) {
+        void startGame(GameMode mode, int length, int scoreTarget = 300, chrono::seconds timeLimit = chrono::seconds(10),
+                       OpponentType opponent = OpponentType::PLAYER_VS_PLAYER, BotDifficulty difficulty = BotDifficulty::MEDIUM) {
             selectedMode = mode;
             selectedLength = length;
             selectedScoreTarget = scoreTarget;
             selectedTimeLimit = timeLimit;
+            selectedOpponent = opponent;
+            selectedDifficulty = difficulty;
             
-            game = make_unique<InfiniteTicTacToe>(mode, length, scoreTarget, timeLimit, viewCenter);
+            game = make_unique<InfiniteTicTacToe>(mode, length, scoreTarget, timeLimit, viewCenter, opponent, difficulty);
             currentState = GameState::PLAYING;
             
             gameView.setCenter(viewCenter);
@@ -1202,7 +1708,8 @@ class Game {
     public:
         Game(): window(VideoMode({800, 600}), L"Крестики-Нолики", Style::Default), currentState(GameState::MENU), 
                 viewCenter(400, 300), zoomLevel(1.0f), selectedLength(5), selectedScoreTarget(300),
-                selectedTimeLimit(chrono::seconds(10)), windowSize(800, 600) {
+                selectedTimeLimit(chrono::seconds(10)), selectedOpponent(OpponentType::PLAYER_VS_PLAYER),
+                selectedDifficulty(BotDifficulty::MEDIUM), windowSize(800, 600) {
             window.setFramerateLimit(static_cast<unsigned int>(targetFPS));
             
             if (!font.openFromFile("C:/Windows/Fonts/arial.ttf")) {
@@ -1218,6 +1725,8 @@ class Game {
             setupPauseMenu();
             setupScoreSelection();
             setupTimeSelection();
+            setupOpponentSelection();
+            setupDifficultySelection();
         }
         
         void run() {
@@ -1247,6 +1756,8 @@ class Game {
                         case GameState::GAME_OVER: handleGameOverInput(*event); break;
                         case GameState::SCORE_SELECTION: handleScoreSelectionInput(*event); break;
                         case GameState::TIME_SELECTION: handleTimeSelectionInput(*event); break;
+                        case GameState::OPPONENT_SELECTION: handleOpponentSelectionInput(*event); break;
+                        case GameState::DIFFICULTY_SELECTION: handleDifficultySelectionInput(*event); break;
                     }
                 }
             }
@@ -1266,7 +1777,9 @@ class Game {
                     size_t index = &button - &menuButtons[0];
                     if (index < 4) {
                         selectedMode = static_cast<GameMode>(index);
-                        if (selectedMode == GameMode::SCORING || selectedMode == GameMode::RANDOM_EVENTS) {
+                        if (selectedMode == GameMode::CLASSIC) {
+                            currentState = GameState::OPPONENT_SELECTION;
+                        } else if (selectedMode == GameMode::SCORING || selectedMode == GameMode::RANDOM_EVENTS) {
                             currentState = GameState::SCORE_SELECTION;
                         } else if (selectedMode == GameMode::TIMED) {
                             currentState = GameState::TIME_SELECTION;
@@ -1463,10 +1976,70 @@ class Game {
                 if (keyPress->code == Keyboard::Key::Escape) currentState = GameState::MENU;
             }
         }
+
+        void handleOpponentSelectionInput(const Event &event) {
+            Vector2f mousePos = window.mapPixelToCoords(Mouse::getPosition(window), uiView);
+            bool mousePressed = false;
+            
+            if (auto mousePress = event.getIf<Event::MouseButtonPressed>()) {
+                if (mousePress->button == Mouse::Button::Left) mousePressed = true;
+            }
+            
+            for (auto &button : opponentButtons) {
+                button.update(mousePos);
+                if (button.isClicked(mousePos, mousePressed)) {
+                    size_t index = &button - &opponentButtons[0];
+                    if (index == 0) {
+                        selectedOpponent = OpponentType::PLAYER_VS_PLAYER;
+                        startGame(selectedMode, selectedLength, selectedScoreTarget, selectedTimeLimit, selectedOpponent, selectedDifficulty);
+                    } else if (index == 1) {
+                        currentState = GameState::DIFFICULTY_SELECTION;
+                    } else if (index == 2) {
+                        currentState = GameState::MENU;
+                    }
+                }
+            }
+            
+            if (auto keyPress = event.getIf<Event::KeyPressed>()) {
+                if (keyPress->code == Keyboard::Key::Escape) currentState = GameState::MENU;
+            }
+        }
+
+        void handleDifficultySelectionInput(const Event &event) {
+            Vector2f mousePos = window.mapPixelToCoords(Mouse::getPosition(window), uiView);
+            bool mousePressed = false;
+            
+            if (auto mousePress = event.getIf<Event::MouseButtonPressed>()) {
+                if (mousePress->button == Mouse::Button::Left) mousePressed = true;
+            }
+            
+            for (auto &button : difficultyButtons) {
+                button.update(mousePos);
+                if (button.isClicked(mousePos, mousePressed)) {
+                    size_t index = &button - &difficultyButtons[0];
+                    if (index < 3) {
+                        selectedDifficulty = static_cast<BotDifficulty>(index);
+                        startGame(selectedMode, selectedLength, selectedScoreTarget, selectedTimeLimit, OpponentType::PLAYER_VS_BOT, selectedDifficulty);
+                    } else if (index == 3) {
+                        currentState = GameState::OPPONENT_SELECTION;
+                    }
+                }
+            }
+            
+            if (auto keyPress = event.getIf<Event::KeyPressed>()) {
+                if (keyPress->code == Keyboard::Key::Escape) currentState = GameState::OPPONENT_SELECTION;
+            }
+        }
         
         void update() {
             float elapsed = frameClock.restart().asSeconds();
             if (elapsed < frameTime) sleep(seconds(frameTime - elapsed));
+
+            // Если игра активна и сейчас ход бота
+            if (currentState == GameState::PLAYING && game && game->isBotCurrentTurn() && !game->isGameWon()) {
+                game->makeBotMove();
+                if (game->isGameWon()) currentState = GameState::GAME_OVER;
+            }
         }
         
         void render() {
@@ -1479,6 +2052,8 @@ class Game {
                 case GameState::GAME_OVER: drawGame(); break;
                 case GameState::SCORE_SELECTION: drawScoreSelection(); break;
                 case GameState::TIME_SELECTION: drawTimeSelection(); break;
+                case GameState::OPPONENT_SELECTION: drawOpponentSelection(); break;
+                case GameState::DIFFICULTY_SELECTION: drawDifficultySelection(); break;
             }
             
             window.display();
@@ -1517,7 +2092,7 @@ class Game {
                              L"R - перезапуск\n"
                              L"+/- - масштабирование\n", 16);
             hints.setFillColor(Color(150, 150, 150));
-            hints.setPosition(Vector2f(windowSize.x - 180, 150));
+            hints.setPosition(Vector2f(windowSize.x - 180, 180));
             window.draw(hints);
         }
         
@@ -1529,13 +2104,13 @@ class Game {
             if (game) game->drawUI(window, font);
             
             Text instructions(font, L"Управление в игре:\n"
-                             L"ЛКМ - сделать ход\n"
-                             L"ПКМ - двигать камеру\n"
-                             L"ESC - пауза/меню\n"
-                             L"R - перезапуск\n"
-                             L"+/- - масштабирование\n", 16);
+                                    L"ЛКМ - сделать ход\n"
+                                    L"ПКМ - двигать камеру\n"
+                                    L"ESC - пауза/меню\n"
+                                    L"R - перезапуск\n"
+                                    L"+/- - масштабирование\n", 16);
             instructions.setFillColor(Color(150, 150, 150));
-            instructions.setPosition(Vector2f(windowSize.x - 180, 150));
+            instructions.setPosition(Vector2f(windowSize.x - 180, 180));
             window.draw(instructions);
         }
         
@@ -1579,8 +2154,7 @@ class Game {
             String modeStr;
             switch (selectedMode) {
                 case GameMode::SCORING: modeStr = L"Режим на очки"; break;
-                case GameMode::RANDOM_EVENTS: modeStr = L"Режим со случайными событиями"; break;
-                default: modeStr = L"Режим";
+                case GameMode::RANDOM_EVENTS: modeStr = L"Режим с событиями"; break;
             }
             
             Text subtitle(font, modeStr, 28);
@@ -1631,6 +2205,70 @@ class Game {
             FloatRect hintBounds = hint.getLocalBounds();
             hint.setPosition(Vector2f(windowSize.x / 2.0f - hintBounds.size.x / 2, 450));
             window.draw(hint);
+        }
+
+        void drawOpponentSelection() {
+            window.setView(uiView);
+            
+            RectangleShape background;
+            background.setSize(Vector2f(windowSize));
+            background.setFillColor(Color(20, 20, 40));
+            background.setPosition(Vector2f(0, 0));
+            window.draw(background);
+            
+            Text title(font, L"ВЫБЕРИТЕ ПРОТИВНИКА", 36);
+            title.setFillColor(Color::Cyan);
+            title.setStyle(Text::Bold);
+            FloatRect titleBounds = title.getLocalBounds();
+            title.setPosition(Vector2f(windowSize.x / 2.0f - titleBounds.size.x / 2, 80));
+            window.draw(title);
+            
+            Text subtitle(font, L"Классический режим", 28);
+            subtitle.setFillColor(Color::White);
+            FloatRect subtitleBounds = subtitle.getLocalBounds();
+            subtitle.setPosition(Vector2f(windowSize.x / 2.0f - subtitleBounds.size.x / 2, 130));
+            window.draw(subtitle);
+            
+            for (auto &button : opponentButtons) {
+                button.draw(window);
+            }
+        }
+
+        void drawDifficultySelection() {
+            window.setView(uiView);
+            
+            RectangleShape background;
+            background.setSize(Vector2f(windowSize));
+            background.setFillColor(Color(20, 20, 40));
+            background.setPosition(Vector2f(0, 0));
+            window.draw(background);
+            
+            Text title(font, L"ВЫБЕРИТЕ СЛОЖНОСТЬ БОТА", 36);
+            title.setFillColor(Color::Cyan);
+            title.setStyle(Text::Bold);
+            FloatRect titleBounds = title.getLocalBounds();
+            title.setPosition(Vector2f(windowSize.x / 2.0f - titleBounds.size.x / 2, 80));
+            window.draw(title);
+            
+            Text subtitle(font, L"Игра против бота", 28);
+            subtitle.setFillColor(Color::White);
+            FloatRect subtitleBounds = subtitle.getLocalBounds();
+            subtitle.setPosition(Vector2f(windowSize.x / 2.0f - subtitleBounds.size.x / 2, 130));
+            window.draw(subtitle);
+            
+            for (auto &button : difficultyButtons) {
+                button.draw(window);
+            }
+            
+            // Подсказки о сложностях
+            Text hints(font, L"Легкий: случайные ходы и простые решения\n"
+                             L"Средний: базовая стратегия\n"
+                             L"Сложный: продвинутая стратегия с просчетом ходов", 16);
+            hints.setFillColor(Color::Yellow);
+            hints.setLineSpacing(1.2f);
+            FloatRect hintsBounds = hints.getLocalBounds();
+            hints.setPosition(Vector2f(windowSize.x / 2.0f - hintsBounds.size.x / 2, 450));
+            window.draw(hints);
         }
 };
 
