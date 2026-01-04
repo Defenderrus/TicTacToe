@@ -1,6 +1,6 @@
 # Компилятор
 CXX = g++
-CXXFLAGS = -std=c++17 -pthread -I. -I./SFML-3.0.2/include
+CXXFLAGS = -std=c++17 -pthread -mwindows -I. -I./SFML-3.0.2/include
 
 # Пути к библиотекам SFML
 SFML_LIBS = -L./SFML-3.0.2/lib -lsfml-graphics -lsfml-window -lsfml-system
