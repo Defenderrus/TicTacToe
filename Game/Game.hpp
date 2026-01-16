@@ -97,18 +97,13 @@ class Game {
 };
 
 Game::Game(): window(VideoMode({800, 600}), L"Крестики-Нолики", Style::Default), currentState(GameState::MENU),
-              viewCenter(400, 300), zoomLevel(1.0f), selectedLength(5), selectedScoreTarget(300),
+              viewCenter(400, 300), zoomLevel(1.0f), selectedLength(5), selectedScoreTarget(100),
               selectedTimeLimit(chrono::seconds(10)), selectedOpponent(OpponentType::PLAYER_VS_PLAYER),
               selectedDifficulty(BotDifficulty::MEDIUM), windowSize(800, 600),
               inputCooldown(0.1f), targetFPS(60.0f), frameTime(1.0f / targetFPS) {
     
     window.setFramerateLimit(static_cast<unsigned int>(targetFPS));
     
-    // if (!font.openFromFile("C:/Windows/Fonts/arial.ttf")) {
-    //     if (!font.openFromFile("C:/Windows/Fonts/tahoma.ttf")) {
-    //         cerr << L"Не удалось загрузить шрифт!" << endl;
-    //     }
-    // }
     if (!font.openFromFile("C:/Windows/Fonts/bahnschrift.ttf")) {
         if (!font.openFromFile("C:/Windows/Fonts/arial.ttf")) {
             cerr << L"Не удалось загрузить шрифт!" << endl;
@@ -243,9 +238,9 @@ void Game::setupScoreSelection() {
     const float startY = 200;
     const float spacing = 60;
     
-    scoreButtons.emplace_back(Vector2f(280, startY), Vector2f(buttonWidth, buttonHeight), font, L"300 очков", 22);
-    scoreButtons.emplace_back(Vector2f(280, startY + spacing), Vector2f(buttonWidth, buttonHeight), font, L"500 очков", 22);
-    scoreButtons.emplace_back(Vector2f(280, startY + spacing * 2), Vector2f(buttonWidth, buttonHeight), font, L"1000 очков", 22);
+    scoreButtons.emplace_back(Vector2f(280, startY), Vector2f(buttonWidth, buttonHeight), font, L"50 очков", 22);
+    scoreButtons.emplace_back(Vector2f(280, startY + spacing), Vector2f(buttonWidth, buttonHeight), font, L"100 очков", 22);
+    scoreButtons.emplace_back(Vector2f(280, startY + spacing * 2), Vector2f(buttonWidth, buttonHeight), font, L"300 очков", 22);
     scoreButtons.emplace_back(Vector2f(280, startY + spacing * 3), Vector2f(buttonWidth, buttonHeight), font, L"Назад", 22);
 }
 
@@ -494,7 +489,7 @@ void Game::handleGameInput(const Event& event) {
 
      // Ограничения на масштаб
     if (zoomLevel > 5.0f) zoomLevel = 5.0f;
-    if (zoomLevel < 0.5f) zoomLevel = 0.5f;
+    if (zoomLevel < 0.1f) zoomLevel = 0.1f;
     
     if (zoomLevel != oldZoom) {
         gameView.setSize(Vector2f(windowSize) * (1.0f / zoomLevel));
@@ -563,13 +558,13 @@ void Game::handleScoreSelectionInput(const Event& event) {
         if (button.isClicked(mousePos, mousePressed)) {
             size_t index = &button - &scoreButtons[0];
             if (index == 0) {
-                selectedScoreTarget = 300;
+                selectedScoreTarget = 50;
                 startGame(selectedMode, selectedLength, selectedScoreTarget, selectedTimeLimit);
             } else if (index == 1) {
-                selectedScoreTarget = 500;
+                selectedScoreTarget = 100;
                 startGame(selectedMode, selectedLength, selectedScoreTarget, selectedTimeLimit);
             } else if (index == 2) {
-                selectedScoreTarget = 1000;
+                selectedScoreTarget = 300;
                 startGame(selectedMode, selectedLength, selectedScoreTarget, selectedTimeLimit);
             } else if (index == 3) {
                 currentState = GameState::MENU;
