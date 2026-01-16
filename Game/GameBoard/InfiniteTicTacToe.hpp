@@ -55,7 +55,9 @@ class InfiniteTicTacToe {
         uniform_int_distribution<int> eventChance;
         vector<Position> moveHistory;
         vector<Position> winLine;
-        RandomEvent lastEvent;
+
+        // RandomEvent lastEvent;
+        RandomEvent nextEvent;
         
         bool isBotTurn;
         bool gameWon;
@@ -97,7 +99,7 @@ class InfiniteTicTacToe {
         void updateTimers() const;
 
     public:
-        InfiniteTicTacToe(GameMode mode = GameMode::CLASSIC, int winningLength = 5, int targetScore = 300,
+        InfiniteTicTacToe(GameMode mode = GameMode::CLASSIC, int winningLength = 5, int targetScore = 100,
                          chrono::seconds timeLimit = chrono::seconds(10), Vector2f windowCenter = Vector2f(400, 300),
                          OpponentType oppType = OpponentType::PLAYER_VS_PLAYER, BotDifficulty botDiff = BotDifficulty::MEDIUM);
         
@@ -202,7 +204,7 @@ RandomEvent InfiniteTicTacToe::generateRandomEvent() {
 }
 
 void InfiniteTicTacToe::handleRandomEvent(RandomEvent event) {
-    lastEvent = event;
+    // lastEvent = event;
 
     switch (event) {
         case RandomEvent::NOTHING:
@@ -396,16 +398,6 @@ void InfiniteTicTacToe::updateGraphics() const {
     int visibleMinY = minY - visibleMargin;
     int visibleMaxY = maxY + visibleMargin;
     
-    const int maxVisible = 30;
-    if (visibleMaxX - visibleMinX > maxVisible) {
-        visibleMinX = -maxVisible/2;
-        visibleMaxX = maxVisible/2;
-    }
-    if (visibleMaxY - visibleMinY > maxVisible) {
-        visibleMinY = -maxVisible/2;
-        visibleMaxY = maxVisible/2;
-    }
-    
     const float halfCell = cellSize * 0.5f;
     const float offset = cellSize * 0.35f;
     
@@ -565,7 +557,8 @@ InfiniteTicTacToe::InfiniteTicTacToe(GameMode mode, int winningLength, int targe
         gameWon(false), 
         gameEndedByScore(false), 
         winner(Cell::EMPTY), 
-        lastEvent(RandomEvent::NOTHING),
+        // lastEvent(RandomEvent::NOTHING),
+        nextEvent(RandomEvent::NOTHING),
         rng(static_cast<unsigned int>(chrono::steady_clock::now().time_since_epoch().count())),
         eventChance(0, 100), 
         graphicsDirty(true), 
@@ -615,6 +608,8 @@ bool InfiniteTicTacToe::handleClick(const Vector2f &mousePos) {
     
     Position pos(gridX, gridY);
     
+    if (board.get(pos) != Cell::EMPTY) return false;
+
     board.set(pos, currentPlayer);
     moveHistory.push_back(pos);
     lastMoveTime = chrono::steady_clock::now();
@@ -630,10 +625,14 @@ bool InfiniteTicTacToe::handleClick(const Vector2f &mousePos) {
         return true;
     }
     
-    if (mode == GameMode::RANDOM_EVENTS) {
-        RandomEvent event = generateRandomEvent();
+    if (mode == GameMode::RANDOM_EVENTS  && nextEvent != RandomEvent::NOTHING) {
+        RandomEvent event = nextEvent;
         handleRandomEvent(event);
+
+        nextEvent = RandomEvent::NOTHING;
+
         if (event == RandomEvent::BONUS_MOVE) {
+            // nextEvent = generateRandomEvent();
             graphicsDirty = true;
             return false;
         }
@@ -644,6 +643,10 @@ bool InfiniteTicTacToe::handleClick(const Vector2f &mousePos) {
     }
 
     currentPlayer = (currentPlayer == Cell::X) ? Cell::O : Cell::X;
+
+    if (mode == GameMode::RANDOM_EVENTS) {
+            nextEvent = generateRandomEvent();
+    }
 
     if (mode == GameMode::TIMED) {
         startTimerForPlayer(currentPlayer);
@@ -811,7 +814,7 @@ void InfiniteTicTacToe::drawUI(RenderWindow &window, const Font &font) const {
     
     if (mode == GameMode::RANDOM_EVENTS) {
         String eventStr;
-        switch (lastEvent) {
+        switch (nextEvent) {
             case RandomEvent::NOTHING: eventStr = L"Обычный ход"; break;
             case RandomEvent::SCORE_PLUS_10: eventStr = L"+10 очков"; break;
             case RandomEvent::SCORE_MINUS_10: eventStr = L"-10 очков"; break;
@@ -822,7 +825,8 @@ void InfiniteTicTacToe::drawUI(RenderWindow &window, const Font &font) const {
             case RandomEvent::CLEAR_AREA: eventStr = L"Очистка области!"; break;
         }
         
-        Text eventText(font, L"Событие: " + eventStr, 14);
+        Text eventText(font, L"Cобытие этого хода: " + eventStr, 14);
+
         eventText.setFillColor(Color::Cyan);
         eventText.setPosition(Vector2f(20, 175));
         window.draw(eventText);
@@ -898,7 +902,8 @@ void InfiniteTicTacToe::reset() {
     gameWon = false;
     gameEndedByScore = false;
     winner = Cell::EMPTY;
-    lastEvent = RandomEvent::NOTHING;
+    // lastEvent = RandomEvent::NOTHING;
+    nextEvent = RandomEvent::NOTHING;
     lastMoveTime = chrono::steady_clock::now();
     graphicsDirty = true;
     checkDirections.fill(true);
