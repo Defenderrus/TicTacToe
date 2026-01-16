@@ -104,8 +104,13 @@ Game::Game(): window(VideoMode({800, 600}), L"Крестики-Нолики", St
     
     window.setFramerateLimit(static_cast<unsigned int>(targetFPS));
     
-    if (!font.openFromFile("C:/Windows/Fonts/arial.ttf")) {
-        if (!font.openFromFile("C:/Windows/Fonts/tahoma.ttf")) {
+    // if (!font.openFromFile("C:/Windows/Fonts/arial.ttf")) {
+    //     if (!font.openFromFile("C:/Windows/Fonts/tahoma.ttf")) {
+    //         cerr << L"Не удалось загрузить шрифт!" << endl;
+    //     }
+    // }
+    if (!font.openFromFile("C:/Windows/Fonts/bahnschrift.ttf")) {
+        if (!font.openFromFile("C:/Windows/Fonts/arial.ttf")) {
             cerr << L"Не удалось загрузить шрифт!" << endl;
         }
     }
@@ -406,6 +411,7 @@ void Game::handleMenuInput(const Event& event) {
 
 void Game::handleGameInput(const Event& event) {
     Vector2f mousePos = window.mapPixelToCoords(Mouse::getPosition(window), gameView);
+    float oldZoom = zoomLevel;
     
     if (auto mousePress = event.getIf<Event::MouseButtonPressed>()) {
         if (mousePress->button == Mouse::Button::Left && checkInputCooldown()) {
@@ -417,8 +423,8 @@ void Game::handleGameInput(const Event& event) {
     }
     
     if (auto mouseWheel = event.getIf<Event::MouseWheelScrolled>()) {
-        if (mouseWheel->delta > 0) zoomLevel *= 0.9f;
-        else zoomLevel *= 1.1f;
+        if (mouseWheel->delta > 0) zoomLevel *= 1.1f;
+        else zoomLevel *= 0.9f;
         gameView.setSize(Vector2f(windowSize) * (1.0f / zoomLevel));
     }
     
@@ -466,6 +472,14 @@ void Game::handleGameInput(const Event& event) {
                 break;
             default: break;
         }
+    }
+
+     // Ограничения на масштаб
+    if (zoomLevel > 5.0f) zoomLevel = 5.0f;
+    if (zoomLevel < 0.5f) zoomLevel = 0.5f;
+    
+    if (zoomLevel != oldZoom) {
+        gameView.setSize(Vector2f(windowSize) * (1.0f / zoomLevel));
     }
 }
 
@@ -641,18 +655,27 @@ void Game::drawMenu() {
     
     RectangleShape background;
     background.setSize(Vector2f(windowSize));
-    background.setFillColor(Color(20, 20, 40));
+
+    // background.setFillColor(Color(20, 20, 40));
+    background.setFillColor(Color(27, 27, 29));
+
     background.setPosition(Vector2f(0, 0));
     window.draw(background);
     
-    Text title(font, L"КРЕСТИКИ-НОЛИКИ", 42);
-    title.setFillColor(Color::Cyan);
+    Text title(font, L"КРЕСТИКИ-НОЛИКИ", 46);
+    title.setFillColor(Color(208, 208, 208));
     title.setStyle(Text::Bold);
+
     FloatRect titleBounds = title.getLocalBounds();
     title.setPosition(Vector2f(windowSize.x / 2.0f - titleBounds.size.x / 2, 50));
     window.draw(title);
+
+    Text shadow = title;
+    shadow.setFillColor(Color(50, 50, 50, 180));
+    shadow.setPosition(Vector2f(windowSize.x / 2.0f - titleBounds.size.x / 2 + 3, 50 + 3));
+    window.draw(shadow);
     
-    Text subtitle(font, L"Выберите режим игры", 28);
+    Text subtitle(font, L"Выберите режим игры", 30);
     subtitle.setFillColor(Color::White);
     FloatRect subtitleBounds = subtitle.getLocalBounds();
     subtitle.setPosition(Vector2f(windowSize.x / 2.0f - subtitleBounds.size.x / 2, 110));
@@ -687,7 +710,7 @@ void Game::drawGame() {
                             L"R - перезапуск\n" \
                             L"+/- - масштабирование\n", 16);
     instructions.setFillColor(Color(150, 150, 150));
-    instructions.setPosition(Vector2f(windowSize.x - 180, 180));
+    instructions.setPosition(Vector2f(windowSize.x - 180, windowSize.y - 120));
     window.draw(instructions);
 }
 
@@ -701,11 +724,16 @@ void Game::drawPauseMenu() {
     window.draw(overlay);
     
     Text pauseText(font, L"ПАУЗА", 52);
-    pauseText.setFillColor(Color::Yellow);
+    pauseText.setFillColor(Color(208, 208, 208));
     pauseText.setStyle(Text::Bold);
     FloatRect pauseBounds = pauseText.getLocalBounds();
     pauseText.setPosition(Vector2f(windowSize.x / 2.0f - pauseBounds.size.x / 2, 150));
     window.draw(pauseText);
+
+    Text shadow = pauseText;
+    shadow.setFillColor(Color(50, 50, 50, 180));
+    shadow.setPosition(Vector2f(windowSize.x / 2.0f - pauseBounds.size.x / 2 + 3, 150 + 3));
+    window.draw(shadow);
     
     for (auto &button : pauseButtons) {
         button.draw(window);
@@ -717,16 +745,21 @@ void Game::drawScoreSelection() {
     
     RectangleShape background;
     background.setSize(Vector2f(windowSize));
-    background.setFillColor(Color(20, 20, 40));
+    background.setFillColor(Color(27, 27, 29));
     background.setPosition(Vector2f(0, 0));
     window.draw(background);
     
     Text title(font, L"ВЫБЕРИТЕ ЦЕЛЕВОЙ СЧЕТ", 36);
-    title.setFillColor(Color::Cyan);
+    title.setFillColor(Color(208, 208, 208));
     title.setStyle(Text::Bold);
     FloatRect titleBounds = title.getLocalBounds();
     title.setPosition(Vector2f(windowSize.x / 2.0f - titleBounds.size.x / 2, 80));
     window.draw(title);
+
+    Text shadow = title;
+    shadow.setFillColor(Color(50, 50, 50, 180));
+    shadow.setPosition(Vector2f(windowSize.x / 2.0f - titleBounds.size.x / 2 + 2, 80 + 2));
+    window.draw(shadow);
     
     String modeStr;
     switch (selectedMode) {
@@ -734,7 +767,7 @@ void Game::drawScoreSelection() {
         case GameMode::RANDOM_EVENTS: modeStr = L"Режим с событиями"; break;
     }
     
-    Text subtitle(font, modeStr, 28);
+    Text subtitle(font, modeStr, 30);
     subtitle.setFillColor(Color::White);
     FloatRect subtitleBounds = subtitle.getLocalBounds();
     subtitle.setPosition(Vector2f(windowSize.x / 2.0f - subtitleBounds.size.x / 2, 130));
@@ -744,7 +777,7 @@ void Game::drawScoreSelection() {
         button.draw(window);
     }
     
-    Text hint(font, L"Очки за изолированную линию = (длина линии)²", 16);
+    Text hint(font, L"Очки за изолированную линию = (длина линии)²", 18);
     hint.setFillColor(Color::Yellow);
     FloatRect hintBounds = hint.getLocalBounds();
     hint.setPosition(Vector2f(windowSize.x / 2.0f - hintBounds.size.x / 2, 450));
@@ -756,18 +789,23 @@ void Game::drawTimeSelection() {
     
     RectangleShape background;
     background.setSize(Vector2f(windowSize));
-    background.setFillColor(Color(20, 20, 40));
+    background.setFillColor(Color(27, 27, 29));
     background.setPosition(Vector2f(0, 0));
     window.draw(background);
     
     Text title(font, L"ВЫБЕРИТЕ ВРЕМЯ НА ХОД", 36);
-    title.setFillColor(Color::Cyan);
+    title.setFillColor(Color(208, 208, 208));
     title.setStyle(Text::Bold);
     FloatRect titleBounds = title.getLocalBounds();
     title.setPosition(Vector2f(windowSize.x / 2.0f - titleBounds.size.x / 2, 80));
     window.draw(title);
+
+    Text shadow = title;
+    shadow.setFillColor(Color(50, 50, 50, 180));
+    shadow.setPosition(Vector2f(windowSize.x / 2.0f - titleBounds.size.x / 2 + 2, 80 + 2));
+    window.draw(shadow);
     
-    Text subtitle(font, L"Режим с таймером", 28);
+    Text subtitle(font, L"Режим с таймером", 30);
     subtitle.setFillColor(Color::White);
     FloatRect subtitleBounds = subtitle.getLocalBounds();
     subtitle.setPosition(Vector2f(windowSize.x / 2.0f - subtitleBounds.size.x / 2, 130));
@@ -789,18 +827,23 @@ void Game::drawOpponentSelection() {
     
     RectangleShape background;
     background.setSize(Vector2f(windowSize));
-    background.setFillColor(Color(20, 20, 40));
+    background.setFillColor(Color(27, 27, 29));
     background.setPosition(Vector2f(0, 0));
     window.draw(background);
     
     Text title(font, L"ВЫБЕРИТЕ ПРОТИВНИКА", 36);
-    title.setFillColor(Color::Cyan);
+    title.setFillColor(Color(208, 208, 208));
     title.setStyle(Text::Bold);
     FloatRect titleBounds = title.getLocalBounds();
     title.setPosition(Vector2f(windowSize.x / 2.0f - titleBounds.size.x / 2, 80));
     window.draw(title);
+
+    Text shadow = title;
+    shadow.setFillColor(Color(50, 50, 50, 180));
+    shadow.setPosition(Vector2f(windowSize.x / 2.0f - titleBounds.size.x / 2 + 2, 80 + 2));
+    window.draw(shadow);
     
-    Text subtitle(font, L"Классический режим", 28);
+    Text subtitle(font, L"Классический режим", 30);
     subtitle.setFillColor(Color::White);
     FloatRect subtitleBounds = subtitle.getLocalBounds();
     subtitle.setPosition(Vector2f(windowSize.x / 2.0f - subtitleBounds.size.x / 2, 130));
@@ -816,18 +859,23 @@ void Game::drawDifficultySelection() {
     
     RectangleShape background;
     background.setSize(Vector2f(windowSize));
-    background.setFillColor(Color(20, 20, 40));
+    background.setFillColor(Color(27, 27, 29));
     background.setPosition(Vector2f(0, 0));
     window.draw(background);
     
     Text title(font, L"ВЫБЕРИТЕ СЛОЖНОСТЬ БОТА", 36);
-    title.setFillColor(Color::Cyan);
+    title.setFillColor(Color(208, 208, 208));
     title.setStyle(Text::Bold);
     FloatRect titleBounds = title.getLocalBounds();
     title.setPosition(Vector2f(windowSize.x / 2.0f - titleBounds.size.x / 2, 80));
     window.draw(title);
+
+    Text shadow = title;
+    shadow.setFillColor(Color(50, 50, 50, 180));
+    shadow.setPosition(Vector2f(windowSize.x / 2.0f - titleBounds.size.x / 2 + 2, 80 + 2));
+    window.draw(shadow);
     
-    Text subtitle(font, L"Игра против бота", 28);
+    Text subtitle(font, L"Игра против бота", 30);
     subtitle.setFillColor(Color::White);
     FloatRect subtitleBounds = subtitle.getLocalBounds();
     subtitle.setPosition(Vector2f(windowSize.x / 2.0f - subtitleBounds.size.x / 2, 130));
