@@ -164,9 +164,26 @@ void Game::update() {
     float elapsed = frameClock.restart().asSeconds();
     if (elapsed < frameTime) sleep(seconds(frameTime - elapsed));
 
-    if (currentState == GameState::PLAYING && game && game->isBotCurrentTurn() && !game->isGameWon()) {
-        game->makeBotMove();
-        if (game->isGameWon()) currentState = GameState::GAME_OVER;
+    if (currentState == GameState::PLAYING && game) {
+
+        // game->isTimeUp();
+
+        if (game->getGameMode() == GameMode::TIMED && game->isTimeUp()) {
+
+            currentState = GameState::GAME_OVER;
+            return;
+        }
+
+        if (game->isGameWon()) {
+            currentState = GameState::GAME_OVER;
+            return;
+        }
+        
+        if (game->isBotCurrentTurn() && !game->isGameWon()) {
+            game->makeBotMove();
+            if (game->isGameWon()) currentState = GameState::GAME_OVER;
+        }
+
     }
 }
 
@@ -234,17 +251,18 @@ void Game::setupScoreSelection() {
 
 void Game::setupTimeSelection() {
     timeButtons.clear();
-    timeButtons.reserve(4);
+    timeButtons.reserve(5);
     
     const float buttonWidth = 240;
     const float buttonHeight = 50;
-    const float startY = 200;
+    const float startY = 180;
     const float spacing = 60;
     
-    timeButtons.emplace_back(Vector2f(280, startY), Vector2f(buttonWidth, buttonHeight), font, L"5 секунд", 22);
-    timeButtons.emplace_back(Vector2f(280, startY + spacing), Vector2f(buttonWidth, buttonHeight), font, L"10 секунд", 22);
-    timeButtons.emplace_back(Vector2f(280, startY + spacing * 2), Vector2f(buttonWidth, buttonHeight), font, L"20 секунд", 22);
-    timeButtons.emplace_back(Vector2f(280, startY + spacing * 3), Vector2f(buttonWidth, buttonHeight), font, L"Назад", 22);
+    timeButtons.emplace_back(Vector2f(280, startY), Vector2f(buttonWidth, buttonHeight), font, L"10 секунд", 22);
+    timeButtons.emplace_back(Vector2f(280, startY + spacing), Vector2f(buttonWidth, buttonHeight), font, L"30 секунд", 22);
+    timeButtons.emplace_back(Vector2f(280, startY + spacing * 2), Vector2f(buttonWidth, buttonHeight), font, L"1 минута", 22);
+    timeButtons.emplace_back(Vector2f(280, startY + spacing * 3), Vector2f(buttonWidth, buttonHeight), font, L"5 минут", 22);
+    timeButtons.emplace_back(Vector2f(280, startY + spacing * 4), Vector2f(buttonWidth, buttonHeight), font, L"Назад", 22);
 }
 
 void Game::setupOpponentSelection() {
@@ -577,15 +595,18 @@ void Game::handleTimeSelectionInput(const Event& event) {
         if (button.isClicked(mousePos, mousePressed)) {
             size_t index = &button - &timeButtons[0];
             if (index == 0) {
-                selectedTimeLimit = chrono::seconds(5);
-                startGame(selectedMode, selectedLength, selectedScoreTarget, selectedTimeLimit);
-            } else if (index == 1) {
                 selectedTimeLimit = chrono::seconds(10);
                 startGame(selectedMode, selectedLength, selectedScoreTarget, selectedTimeLimit);
-            } else if (index == 2) {
-                selectedTimeLimit = chrono::seconds(20);
+            } else if (index == 1) {
+                selectedTimeLimit = chrono::seconds(30);
                 startGame(selectedMode, selectedLength, selectedScoreTarget, selectedTimeLimit);
-            } else if (index == 3) {
+            } else if (index == 2) {
+                selectedTimeLimit = chrono::seconds(60);
+                startGame(selectedMode, selectedLength, selectedScoreTarget, selectedTimeLimit);
+                } else if (index == 3) {
+                selectedTimeLimit = chrono::seconds(300);
+                startGame(selectedMode, selectedLength, selectedScoreTarget, selectedTimeLimit);
+            } else if (index == 4) {
                 currentState = GameState::MENU;
             }
         }
@@ -692,7 +713,7 @@ void Game::drawMenu() {
                      L"R - перезапуск\n" \
                      L"+/- - масштабирование\n", 16);
     hints.setFillColor(Color(150, 150, 150));
-    hints.setPosition(Vector2f(windowSize.x - 180, 180));
+    hints.setPosition(Vector2f(windowSize.x - 180, windowSize.y - 120));
     window.draw(hints);
 }
 
@@ -793,7 +814,7 @@ void Game::drawTimeSelection() {
     background.setPosition(Vector2f(0, 0));
     window.draw(background);
     
-    Text title(font, L"ВЫБЕРИТЕ ВРЕМЯ НА ХОД", 36);
+    Text title(font, L"ВЫБЕРИТЕ ВРЕМЯ НА ИГРОКА", 36);
     title.setFillColor(Color(208, 208, 208));
     title.setStyle(Text::Bold);
     FloatRect titleBounds = title.getLocalBounds();
@@ -815,10 +836,10 @@ void Game::drawTimeSelection() {
         button.draw(window);
     }
     
-    Text hint(font, L"Если время истекает, ход переходит другому игроку", 16);
+    Text hint(font, L"Каждому игроку отводится указанное время на всю игру", 16);
     hint.setFillColor(Color::Yellow);
     FloatRect hintBounds = hint.getLocalBounds();
-    hint.setPosition(Vector2f(windowSize.x / 2.0f - hintBounds.size.x / 2, 450));
+    hint.setPosition(Vector2f(windowSize.x / 2.0f - hintBounds.size.x / 2, 500));
     window.draw(hint);
 }
 
