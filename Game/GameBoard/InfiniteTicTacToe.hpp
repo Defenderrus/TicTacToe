@@ -9,6 +9,8 @@
 #include <chrono>
 #include <random>
 #include <cmath>
+#include <sstream>
+#include <iomanip>
 
 using namespace std;
 using namespace sf;
@@ -22,7 +24,14 @@ class InfiniteTicTacToe {
         Cell currentPlayer;
         int winningLength;
         int targetScore;
-        chrono::seconds moveTimeLimit;
+
+        chrono::milliseconds initialTimeLimit;
+
+        mutable chrono::milliseconds playerXTimeLeft;
+        mutable chrono::milliseconds playerOTimeLeft;
+        mutable chrono::steady_clock::time_point turnStartTime;
+        mutable bool isTimerRunning;
+        mutable Cell playerWithTimerRunning;
         
         // Графика
         float cellSize;
@@ -83,6 +92,10 @@ class InfiniteTicTacToe {
         int countInDirection(const Position &start, int dx, int dy, Cell player) const;
         void updateGraphics() const;
 
+        void startTimerForPlayer(Cell player) const; ////////
+        void stopTimer() const;
+        void updateTimers() const;
+
     public:
         InfiniteTicTacToe(GameMode mode = GameMode::CLASSIC, int winningLength = 5, int targetScore = 300,
                          chrono::seconds timeLimit = chrono::seconds(10), Vector2f windowCenter = Vector2f(400, 300),
@@ -102,6 +115,9 @@ class InfiniteTicTacToe {
         GameMode getGameMode() const;
         int getTargetScore() const;
         chrono::seconds getTimeLimit() const;
+        
+        
+        bool isTimeUp() const;
         
         // Сброс и настройка
         void reset();
@@ -496,23 +512,98 @@ void InfiniteTicTacToe::updateGraphics() const {
     graphicsDirty = false;
 }
 
+void InfiniteTicTacToe::stopTimer() const{
+
+    if (mode != GameMode::TIMED || !isTimerRunning) return;
+
+    updateTimers();
+    
+    isTimerRunning = false;
+    playerWithTimerRunning = Cell::EMPTY;
+}
+
+void InfiniteTicTacToe::updateTimers() const {
+
+    if (mode != GameMode::TIMED || !isTimerRunning) return;
+    
+    auto now = chrono::steady_clock::now();
+    auto elapsed = chrono::duration_cast<chrono::milliseconds>(now - turnStartTime);
+
+
+    
+    if (elapsed.count() > 0) {
+        if (playerWithTimerRunning == Cell::X) {
+            playerXTimeLeft -= elapsed;
+            if (playerXTimeLeft.count() < 0) playerXTimeLeft = chrono::milliseconds(0);
+        } 
+        else if (playerWithTimerRunning == Cell::O) {
+            playerOTimeLeft -= elapsed;
+            if (playerOTimeLeft.count() < 0) playerOTimeLeft = chrono::milliseconds(0);
+        }
+    }
+    
+    turnStartTime = now;
+}
+
 InfiniteTicTacToe::InfiniteTicTacToe(GameMode mode, int winningLength, int targetScore, chrono::seconds timeLimit,
-                                     Vector2f windowCenter, OpponentType oppType, BotDifficulty botDiff):
-                                    currentPlayer(Cell::X), mode(mode), winningLength(winningLength), targetScore(targetScore),
-                                    moveTimeLimit(timeLimit), cellSize(40.0f), center(windowCenter), opponentType(oppType),
-                                    botDifficulty(botDiff), isBotTurn(false), playerXScore(0), playerOScore(0),
-                                    playerXBaseScore(0), playerOBaseScore(0), playerXBonusScore(0), playerOBonusScore(0),
-                                    gameWon(false), gameEndedByScore(false), winner(Cell::EMPTY), lastEvent(RandomEvent::NOTHING),
-                                    rng(static_cast<unsigned int>(chrono::steady_clock::now().time_since_epoch().count())),
-                                    eventChance(0, 100), graphicsDirty(true), gridVertices(PrimitiveType::Lines),
-                                    xVertices(PrimitiveType::Lines), oVertices(PrimitiveType::Lines), 
-                                    highlightVertices(PrimitiveType::TriangleStrip) {
+    Vector2f windowCenter, OpponentType oppType, BotDifficulty botDiff):
+        currentPlayer(Cell::X), 
+        mode(mode), 
+        winningLength(winningLength), 
+        targetScore(targetScore), 
+        cellSize(40.0f), 
+        center(windowCenter), 
+        opponentType(oppType),
+        botDifficulty(botDiff), 
+        isBotTurn(false), 
+        playerXScore(0), 
+        playerOScore(0),
+        playerXBaseScore(0), 
+        playerOBaseScore(0), 
+        playerXBonusScore(0), 
+        playerOBonusScore(0),
+        gameWon(false), 
+        gameEndedByScore(false), 
+        winner(Cell::EMPTY), 
+        lastEvent(RandomEvent::NOTHING),
+        rng(static_cast<unsigned int>(chrono::steady_clock::now().time_since_epoch().count())),
+        eventChance(0, 100), 
+        graphicsDirty(true), 
+        gridVertices(PrimitiveType::Lines),
+        xVertices(PrimitiveType::Lines), 
+        oVertices(PrimitiveType::Lines), 
+        highlightVertices(PrimitiveType::TriangleStrip),
+
+        initialTimeLimit(chrono::duration_cast<chrono::milliseconds>(timeLimit)),
+        playerXTimeLeft(chrono::duration_cast<chrono::milliseconds>(timeLimit)),         // Инициализируем время
+        playerOTimeLeft(chrono::duration_cast<chrono::milliseconds>(timeLimit)),
+        isTimerRunning(false),
+        playerWithTimerRunning(Cell::EMPTY) {
+
     lastMoveTime = chrono::steady_clock::now();
     checkDirections.fill(true);
+
+    // Запускаем таймер для первого игрока
+    if (mode == GameMode::TIMED) {
+        startTimerForPlayer(currentPlayer);
+    }
+
     if (opponentType == OpponentType::PLAYER_VS_BOT) {
         bot = make_unique<TicTacToeBot>(botDiff, currentPlayer);
         isBotTurn = true;
     }
+}
+
+void InfiniteTicTacToe::startTimerForPlayer(Cell player) const{
+    if (mode != GameMode::TIMED) return;
+    
+    if (isTimerRunning) {
+        stopTimer();
+    }
+
+    turnStartTime = chrono::steady_clock::now();
+    isTimerRunning = true;
+    playerWithTimerRunning = player;
 }
 
 bool InfiniteTicTacToe::handleClick(const Vector2f &mousePos) {
@@ -524,18 +615,6 @@ bool InfiniteTicTacToe::handleClick(const Vector2f &mousePos) {
     
     Position pos(gridX, gridY);
     
-    if (board.get(pos) != Cell::EMPTY) return false;
-    
-    if (mode == GameMode::TIMED) {
-        auto now = chrono::steady_clock::now();
-        auto elapsed = chrono::duration_cast<chrono::seconds>(now - lastMoveTime);
-        if (elapsed > moveTimeLimit) {
-            currentPlayer = (currentPlayer == Cell::X) ? Cell::O : Cell::X;
-            lastMoveTime = now;
-            return false;
-        }
-    }
-    
     board.set(pos, currentPlayer);
     moveHistory.push_back(pos);
     lastMoveTime = chrono::steady_clock::now();
@@ -544,6 +623,9 @@ bool InfiniteTicTacToe::handleClick(const Vector2f &mousePos) {
     expandBoardIfNeeded(pos);
     if (mode == GameMode::SCORING || mode == GameMode::RANDOM_EVENTS) calculateBoardScores();
     if (gameWon) {
+        if (mode == GameMode::TIMED) {
+            stopTimer();
+        }
         graphicsDirty = true;
         return true;
     }
@@ -557,7 +639,16 @@ bool InfiniteTicTacToe::handleClick(const Vector2f &mousePos) {
         }
     }
     
+    if (mode == GameMode::TIMED) {
+        stopTimer();
+    }
+
     currentPlayer = (currentPlayer == Cell::X) ? Cell::O : Cell::X;
+
+    if (mode == GameMode::TIMED) {
+        startTimerForPlayer(currentPlayer);
+    }
+
     if (opponentType == OpponentType::PLAYER_VS_BOT) isBotTurn = true;
     graphicsDirty = true;
     
@@ -688,21 +779,35 @@ void InfiniteTicTacToe::drawUI(RenderWindow &window, const Font &font) const {
         }
     }
     
-    if (mode == GameMode::TIMED) {
-        auto now = chrono::steady_clock::now();
-        auto elapsed = chrono::duration_cast<chrono::seconds>(now - lastMoveTime);
-        auto remaining = moveTimeLimit > elapsed ? moveTimeLimit - elapsed : chrono::seconds(0);
-        
-        Text timerText(font, L"Время: " + to_wstring(remaining.count()) + L"с", 16);
-        timerText.setFillColor(remaining.count() < 5 ? Color::Red : Color::Yellow);
-        timerText.setPosition(Vector2f(20, 100));
-        window.draw(timerText);
-        
-        Text limitText(font, L"Лимит: " + to_wstring(moveTimeLimit.count()) + L"с", 16);
-        limitText.setFillColor(Color::White);
-        limitText.setPosition(Vector2f(20, 125));
-        window.draw(limitText);
-    }
+    if (mode == GameMode::TIMED) { 
+
+    updateTimers();
+
+    float xSeconds = playerXTimeLeft.count() / 1000.0f;
+    float oSeconds = playerOTimeLeft.count() / 1000.0f;
+
+    wstringstream xStream, oStream;
+    xStream << fixed << setprecision(1) << xSeconds;
+    oStream << fixed << setprecision(1) << oSeconds;
+    
+    Color xColor = (currentPlayer == Cell::X) ? Color::Yellow : Color(200, 200, 200); // - это светлосерый
+    Color oColor = (currentPlayer == Cell::O) ? Color::Yellow : Color(200, 200, 200);
+    
+    // Если время < 10 секунд - красный
+    if (playerXTimeLeft.count() < 10000) xColor = Color::Red;
+    if (playerOTimeLeft.count() < 10000) oColor = Color::Red;
+
+    Text xTimerText(font, L"X: " + xStream.str() + L"с", 18);
+    xTimerText.setFillColor(xColor);
+    xTimerText.setPosition(Vector2f(20, 100));
+    window.draw(xTimerText);
+
+    Text oTimerText(font, L"O: " + oStream.str() + L"с", 18);
+    oTimerText.setFillColor(oColor);
+    oTimerText.setPosition(Vector2f(20, 125));
+    window.draw(oTimerText);
+
+}
     
     if (mode == GameMode::RANDOM_EVENTS) {
         String eventStr;
@@ -739,7 +844,14 @@ void InfiniteTicTacToe::drawUI(RenderWindow &window, const Font &font) const {
                         L" достиг цели в " + to_wstring(targetScore) + L" очков!\n" +
                         L"Финальный счет: X=" + to_wstring(playerXScore) + 
                         L" O=" + to_wstring(playerOScore);
-        } else {
+        } 
+        else if (mode == GameMode::TIMED  && winLine.empty()) {
+
+            winMessage = L" Игрок " + String(winner == Cell::X ? L"X" : L"O") + 
+                        L" выиграл по времени!\n" +
+                        L"У противника закончилось время.";
+        }
+        else {
             winMessage = L"Игрок " + String(winner == Cell::X ? L"X" : L"O") + 
                         L" собрал линию из " + to_wstring(winningLength) + L" элементов!";
         }
@@ -772,7 +884,7 @@ Cell InfiniteTicTacToe::getCurrentPlayer() const { return currentPlayer; }
 pair<int, int> InfiniteTicTacToe::getScore() const { return {playerXScore, playerOScore}; }
 GameMode InfiniteTicTacToe::getGameMode() const { return mode; }
 int InfiniteTicTacToe::getTargetScore() const { return targetScore; }
-chrono::seconds InfiniteTicTacToe::getTimeLimit() const { return moveTimeLimit; }
+chrono::seconds InfiniteTicTacToe::getTimeLimit() const { return chrono::duration_cast<chrono::seconds>(initialTimeLimit); }
 
 void InfiniteTicTacToe::reset() {
     board.clear();
@@ -793,6 +905,16 @@ void InfiniteTicTacToe::reset() {
     cellSize = 40.0f;
     visited.clear();
 
+    if (mode == GameMode::TIMED) {
+
+        playerXTimeLeft = initialTimeLimit;
+        playerOTimeLeft = initialTimeLimit;
+        isTimerRunning = false;
+        playerWithTimerRunning = Cell::EMPTY;
+        
+        startTimerForPlayer(currentPlayer);
+    }
+
     if (opponentType == OpponentType::PLAYER_VS_BOT) {
         if (!bot) {
             bot = make_unique<TicTacToeBot>(botDifficulty, currentPlayer);
@@ -810,7 +932,15 @@ void InfiniteTicTacToe::reset(GameMode newMode, int newWinningLength, int newTar
     mode = newMode;
     winningLength = newWinningLength;
     targetScore = newTargetScore;
-    moveTimeLimit = newTimeLimit;
+
+    initialTimeLimit = chrono::duration_cast<chrono::milliseconds>(newTimeLimit);
+
+    playerXTimeLeft = newTimeLimit;
+    playerOTimeLeft = newTimeLimit;
+
+    // playerXTimeLeft = chrono::duration_cast<chrono::milliseconds>(newTimeLimit);
+    // playerOTimeLeft = chrono::duration_cast<chrono::milliseconds>(newTimeLimit);
+
     reset();
 }
 
@@ -827,4 +957,27 @@ void InfiniteTicTacToe::setCellSize(float size) {
 void InfiniteTicTacToe::setCenter(const Vector2f &newCenter) {
     center = newCenter;
     graphicsDirty = true;
+}
+
+bool InfiniteTicTacToe::isTimeUp() const {
+
+    updateTimers();
+    
+    if (playerXTimeLeft.count() <= 0) {
+
+        const_cast<InfiniteTicTacToe*>(this)->gameWon = true;
+        const_cast<InfiniteTicTacToe*>(this)->winner = Cell::O;  // X проиграл по времени
+        const_cast<InfiniteTicTacToe*>(this)->gameEndedByScore = false;
+
+        return true;
+    }
+    if (playerOTimeLeft.count() <= 0) {
+
+        const_cast<InfiniteTicTacToe*>(this)->gameWon = true;
+        const_cast<InfiniteTicTacToe*>(this)->winner = Cell::X;  // O проиграл по времени
+        const_cast<InfiniteTicTacToe*>(this)->gameEndedByScore = false;
+
+        return true;
+    }
+    return false;
 }
