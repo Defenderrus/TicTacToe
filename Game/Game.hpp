@@ -52,6 +52,8 @@ class Game {
         float frameTime;
         Vector2u windowSize;
 
+        bool playerJustMoved;
+
     public:
         Game();
         void run();
@@ -100,7 +102,7 @@ Game::Game(): window(VideoMode({800, 600}), L"Крестики-Нолики", St
               viewCenter(400, 300), zoomLevel(1.0f), selectedLength(5), selectedScoreTarget(100),
               selectedTimeLimit(chrono::seconds(10)), selectedOpponent(OpponentType::PLAYER_VS_PLAYER),
               selectedDifficulty(BotDifficulty::MEDIUM), windowSize(800, 600),
-              inputCooldown(0.1f), targetFPS(60.0f), frameTime(1.0f / targetFPS) {
+              inputCooldown(0.1f), targetFPS(60.0f), frameTime(1.0f / targetFPS), playerJustMoved(false) {
     
     window.setFramerateLimit(static_cast<unsigned int>(targetFPS));
     
@@ -155,7 +157,8 @@ void Game::processEvents() {
     }
 }
 
-void Game::update() {
+void Game::update() { ///////////////////////////////////////////////////////////////////////////////////////////
+
     float elapsed = frameClock.restart().asSeconds();
     if (elapsed < frameTime) sleep(seconds(frameTime - elapsed));
 
@@ -174,11 +177,15 @@ void Game::update() {
             return;
         }
         
+        if (playerJustMoved) {
+            playerJustMoved = false;
+            return;
+        }
+
         if (game->isBotCurrentTurn() && !game->isGameWon()) {
             game->makeBotMove();
             if (game->isGameWon()) currentState = GameState::GAME_OVER;
         }
-
     }
 }
 
@@ -430,6 +437,9 @@ void Game::handleGameInput(const Event& event) {
         if (mousePress->button == Mouse::Button::Left && checkInputCooldown()) {
             if (game && !game->isGameWon()) {
                 bool gameEnded = game->handleClick(mousePos);
+
+                playerJustMoved = true;
+
                 if (gameEnded) currentState = GameState::GAME_OVER;
             }
         }
@@ -485,6 +495,7 @@ void Game::handleGameInput(const Event& event) {
                 break;
             default: break;
         }
+
     }
 
      // Ограничения на масштаб
