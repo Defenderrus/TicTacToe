@@ -6,7 +6,13 @@ CXXFLAGS = -std=c++17 -pthread -mwindows -I. -I./SFML-3.0.2/include
 SFML_LIBS = -L./SFML-3.0.2/lib -lsfml-graphics -lsfml-window -lsfml-system
 
 # Все исходные файлы
-SRCS = main.cpp
+SRCS = main.cpp \
+	   Game/Game.cpp \
+	   Game/GameUI.cpp \
+	   Game/GameBoard/GameBoard.cpp \
+	   Game/GameBoard/InfiniteTicTacToe.cpp \
+	   Game/GameBoard/AI/TicTacToeBot.cpp \
+	   Game/GameBoard/Core/Position.cpp
 
 # Цели
 all:
